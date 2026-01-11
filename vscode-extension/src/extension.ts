@@ -7,7 +7,15 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Get backend URL from settings
     const config = vscode.workspace.getConfiguration('agenticIDE');
-    const backendUrl = config.get<string>('backendUrl') || 'http://localhost:8000';
+    const backendUrl = config.get<string>('backendUrl') || 'https://web-production-ff3c3.up.railway.app';
+
+    // Detailed logging for backend URL
+    console.log('===========================================');
+    console.log('🌐 BACKEND URL CONFIGURATION:');
+    console.log('Backend URL:', backendUrl);
+    console.log('Config value:', config.get<string>('backendUrl'));
+    console.log('Using default?', !config.get<string>('backendUrl'));
+    console.log('===========================================');
 
     // Initialize backend client
     const backendClient = new BackendClient(backendUrl);

@@ -179,12 +179,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             session["state"] = step_state
             
             # Send update to extension
+            # Send update to extension
             await websocket.send_json({
                 "type": "step_update",
                 "active_agent": step_state.get("active_agent"),
                 "current_step": step_state.get("current_step"),
                 "plan": step_state.get("plan", []),
                 "generated_files": step_state.get("generated_files", []),
+                "file_contents": step_state.get("file_contents", {}),  # ← ADD THIS LINE
                 "needs_review": step_state.get("needs_review", False),
                 "done": step_state.get("done", False)
             })
@@ -199,7 +201,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 await websocket.send_json({
                     "type": "review_required",
                     "plan": step_state.get("plan", []),
-                    "generated_files": step_state.get("generated_files", [])
+                    "generated_files": step_state.get("generated_files", []),
+                    "file_contents": step_state.get("file_contents", {})
                 })
                 session["status"] = "paused_for_review"
                 session["paused_for_review"] = True
@@ -210,7 +213,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 print(f"\n✅ Workflow completed")
                 await websocket.send_json({
                     "type": "workflow_complete",
-                    "generated_files": step_state.get("generated_files", [])
+                    "generated_files": step_state.get("generated_files", []),
+                    "file_contents": step_state.get("file_contents", {})
                 })
                 session["status"] = "completed"
                 break
@@ -264,10 +268,10 @@ if __name__ == "__main__":
     print("\n" + "="*70)
     print("🚀 Starting Agentic IDE Backend Server")
     print("="*70)
-    print(f"Server: http://localhost:{port}")#url where we can access the app
+    """print(f"Server: http://localhost:{port}")#url where we can access the app
     print(f"WebSocket: ws://localhost:{port}/ws/{{session_id}}")#websocket endpoint url
     print(f"Health: http://localhost:{port}/health") #checking the health of the application
-    print("="*70 + "\n")
+    print("="*70 + "\n")"""
     
     uvicorn.run(
         app,

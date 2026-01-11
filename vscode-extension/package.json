@@ -45,7 +45,7 @@
       "properties": {
         "agenticIDE.backendUrl": {
           "type": "string",
-          "default": "http://localhost:8000",
+          "default": "https://web-production-ff3c3.up.railway.app",
           "description": "Backend server URL (your Python FastAPI server)"
         }
       }

@@ -26,6 +26,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         // Handle messages from the webview
         webviewView.webview.onDidReceiveMessage(async (data) => {
+            console.log('=== Webview message received ===');
+            console.log('Message type:', data.type);
+            console.log('Message data:', data);
+            
             switch (data.type) {
                 case 'sendMessage':
                     await this.handleUserMessage(data.message);
@@ -41,7 +45,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private async handleUserMessage(message: string) {
+        console.log('=== handleUserMessage called ===');
+        console.log('Message:', message);
+        
         if (!this._view) {
+            console.log('ERROR: No view available');
             return;
         }
 
@@ -64,18 +72,30 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 throw new Error('Please open a workspace folder first');
             }
 
+            console.log('Workspace folder:', workspaceFolder.uri.fsPath);
+            console.log('Calling startWorkflow...');
+            
             // Start workflow
             const session = await this.backendClient.startWorkflow(
                 message,
                 workspaceFolder.uri.fsPath
             );
 
+            console.log('Session created:', session);
             this.currentSessionId = session.session_id;
 
+            console.log('Connecting to WebSocket...');
             // Connect to WebSocket for real-time updates
             await this.connectToWorkflow();
+            
+            console.log('WebSocket connected successfully');
 
         } catch (error: any) {
+            console.error('=== ERROR in handleUserMessage ===');
+            console.error('Error object:', error);
+            console.error('Error message:', error.message);
+            console.error('Error stack:', error.stack);
+            
             this._view.webview.postMessage({
                 type: 'error',
                 message: error.message || 'Failed to start workflow'
@@ -89,13 +109,20 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private async connectToWorkflow() {
+        console.log('=== connectToWorkflow called ===');
+        console.log('Current session ID:', this.currentSessionId);
+        
         if (!this.currentSessionId || !this._view) {
+            console.log('ERROR: Missing session ID or view');
             return;
         }
 
         try {
+            console.log('Calling backendClient.connectWebSocket...');
+            
             await this.backendClient.connectWebSocket(this.currentSessionId, {
                 onStepUpdate: (data) => {
+                    console.log('WebSocket: Step update received', data);
                     this._view?.webview.postMessage({
                         type: 'stepUpdate',
                         step: data.current_step,
@@ -104,6 +131,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     });
                 },
                 onReviewRequired: (data) => {
+                    console.log('WebSocket: Review required', data);
                     this._view?.webview.postMessage({
                         type: 'reviewRequired',
                         plan: data.plan,
@@ -116,6 +144,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     });
                 },
                 onComplete: (data) => {
+                    console.log('WebSocket: Workflow complete', data);
                     this._view?.webview.postMessage({
                         type: 'workflowComplete',
                         files: data.generated_files
@@ -127,6 +156,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     });
                 },
                 onError: (error) => {
+                    console.error('WebSocket: Error received', error);
                     this._view?.webview.postMessage({
                         type: 'error',
                         message: error.message || 'An error occurred'
@@ -138,7 +168,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     });
                 }
             });
+            
+            console.log('WebSocket connection completed');
         } catch (error: any) {
+            console.error('=== ERROR in connectToWorkflow ===');
+            console.error('Error object:', error);
+            console.error('Error message:', error.message);
+            console.error('Error stack:', error.stack);
+            
             this._view?.webview.postMessage({
                 type: 'error',
                 message: 'Connection error: ' + error.message
@@ -152,7 +189,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private async handleReviewSubmission(feedback: string, action: 'approve' | 'revise') {
+        console.log('=== handleReviewSubmission called ===');
+        console.log('Action:', action);
+        console.log('Feedback:', feedback);
+        
         if (!this.currentSessionId || !this._view) {
+            console.log('ERROR: Missing session ID or view');
             return;
         }
 
@@ -191,6 +233,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 await this.connectToWorkflow();
             }
         } catch (error: any) {
+            console.error('=== ERROR in handleReviewSubmission ===');
+            console.error('Error:', error);
+            
             this._view.webview.postMessage({
                 type: 'error',
                 message: error.message || 'Failed to submit review'
