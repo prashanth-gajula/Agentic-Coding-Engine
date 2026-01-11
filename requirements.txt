@@ -1,0 +1,7 @@
+langchain_openai
+python_dotenv
+langchain_community
+langchain
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+websockets==12.0

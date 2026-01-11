@@ -1,0 +1,70 @@
+{
+  "name": "agentic-ide",
+  "displayName": "Agentic IDE",
+  "description": "AI-powered coding assistant with multi-agent workflow",
+  "version": "0.1.0",
+  "publisher": "Prashanth Kumar Gajula",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agentic-ide-sidebar",
+          "title": "Agentic IDE",
+          "icon": "$(robot)"
+        }
+      ]
+    },
+    "views": {
+      "agentic-ide-sidebar": [
+        {
+          "type": "webview",
+          "id": "agentic-ide.chatView",
+          "name": "Chat"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "agentic-ide.startWorkflow",
+        "title": "Agentic IDE: Start Workflow"
+      }
+    ],
+    "configuration": {
+      "title": "Agentic IDE",
+      "properties": {
+        "agenticIDE.backendUrl": {
+          "type": "string",
+          "default": "http://localhost:8000",
+          "description": "Backend server URL (your Python FastAPI server)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "@types/vscode": "^1.107.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "ws": "^8.18.0"
+  }
+}

@@ -205,3 +205,60 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+
+# ========================================
+# VS Code Extension / Node.js specific
+# ========================================
+
+# Node modules
+node_modules/
+vscode-extension/node_modules/
+
+# Compiled TypeScript output
+vscode-extension/out/
+vscode-extension/dist/
+*.js.map
+
+# VS Code extension package
+*.vsix
+
+# Package manager lockfiles (optional - some prefer to commit these)
+# package-lock.json
+# yarn.lock
+
+# ========================================
+# Operating System
+# ========================================
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# ========================================
+# Additional Editor files
+# ========================================
+
+# Vim
+*.swp
+*.swo
+*.swn
+
+# Emacs
+*~
+\#*\#
+.\#*
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
