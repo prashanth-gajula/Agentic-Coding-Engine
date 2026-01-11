@@ -11,7 +11,7 @@ from langchain_core.tools import tool
 # You can set PROJECT_ROOT in .env, otherwise cwd is used.
 PROJECT_ROOT = Path(os.getenv("PROJECT_ROOT", Path.cwd())).resolve()
 
-PROJECT_ROOT = PROJECT_ROOT / 'Workflow_Testing'
+#PROJECT_ROOT = PROJECT_ROOT / 'Workflow_Testing'
 
 def _resolve_safe(path: str) -> Path:
     """
