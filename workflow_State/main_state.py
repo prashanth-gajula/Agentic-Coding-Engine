@@ -1,4 +1,4 @@
-from typing import Annotated, List, Optional, Literal
+from typing import Annotated, List, Optional, Literal, Dict
 from typing_extensions import TypedDict
 
 from langgraph.graph import add_messages
@@ -65,6 +65,12 @@ class AgentState(TypedDict):
     
     needs_review: bool  # Context agent sets this to trigger review
     user_feedback: Optional[str]  # Stores user's revision feedback
+    
+    # File contents storage - ADD THIS LINE
+    file_contents: Dict[str, str]  # Maps filename to file content
+    
+    # Project path - ADD THIS LINE
+    project_path: Optional[str]  # Path to the project directory
     
     #memory 
     conversation_history: list

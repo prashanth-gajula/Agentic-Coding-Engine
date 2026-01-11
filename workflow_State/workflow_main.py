@@ -123,6 +123,8 @@ def create_initial_state(user_request: str) -> AgentState:
         "expected_file_count": 0,
         "needs_review": False,
         "user_feedback": None,
+        "file_contents": {},  # ← ADD THIS LINE
+        "project_path": None,  # ← ADD THIS LINE
         "conversation_history": [],
         "recent_files": [],
         "current_working_file": None,
