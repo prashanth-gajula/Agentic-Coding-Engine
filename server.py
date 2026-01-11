@@ -71,7 +71,7 @@ async def start_workflow(req: WorkflowStartRequest):
         
         # Create initial state
         initial_state = create_initial_state(req.request)
-        
+        initial_state["project_path"] = req.project_path
         # Store session
         active_sessions[session_id] = {
             "workflow": workflow_app,
