@@ -173,7 +173,7 @@ def CodeAgent(state: AgentState) -> AgentState:
                     )
                 )
     
-    # ===== NEW CODE: Read file contents and include in state =====
+    # ===== FIXED CODE: Read file contents with correct paths =====
     # Update state with results from THIS step
     if files_created or files_modified:
         # Initialize file_contents if it doesn't exist
@@ -182,19 +182,45 @@ def CodeAgent(state: AgentState) -> AgentState:
         
         generated = state.get("generated_files", [])
         
+        # Get the project path from state (absolute path passed by VS Code)
+        project_path = state.get("project_path", os.getcwd())
+        
+        print(f"[CodeAgent]   📂 Project path: {project_path}")
+        print(f"[CodeAgent]   📂 Current working directory: {os.getcwd()}")
+        
         # Process newly created files
         for file_path in files_created:
             if file_path not in generated:
                 generated.append(file_path)
             
+            # Build the absolute path
+            if os.path.isabs(file_path):
+                abs_path = file_path
+            else:
+                abs_path = os.path.join(project_path, file_path)
+            
+            print(f"[CodeAgent]   🔍 Attempting to read: {file_path}")
+            print(f"[CodeAgent]   📁 Absolute path: {abs_path}")
+            print(f"[CodeAgent]   ✓ File exists? {os.path.exists(abs_path)}")
+            
             # Read and store file contents
             try:
-                with open(file_path, 'r', encoding='utf-8') as f:
+                with open(abs_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                     state["file_contents"][file_path] = content
-                    print(f"[CodeAgent]   📄 Read contents of {file_path} ({len(content)} chars)")
+                    print(f"[CodeAgent]   ✅ Successfully read {len(content)} characters from {file_path}")
             except Exception as e:
-                print(f"[CodeAgent]   ⚠️  Could not read {file_path}: {e}")
+                print(f"[CodeAgent]   ❌ ERROR reading {abs_path}")
+                print(f"[CodeAgent]   ❌ Error type: {type(e).__name__}")
+                print(f"[CodeAgent]   ❌ Error message: {e}")
+                
+                # Debug: List files in project directory
+                try:
+                    files_in_dir = os.listdir(project_path)
+                    print(f"[CodeAgent]   📁 Files in project directory: {files_in_dir}")
+                except:
+                    pass
+                
                 state["file_contents"][file_path] = f"Error reading file: {e}"
         
         # Process modified files
@@ -202,18 +228,27 @@ def CodeAgent(state: AgentState) -> AgentState:
             if file_path not in generated:
                 generated.append(file_path)
             
+            # Build the absolute path
+            if os.path.isabs(file_path):
+                abs_path = file_path
+            else:
+                abs_path = os.path.join(project_path, file_path)
+            
+            print(f"[CodeAgent]   🔍 Attempting to read modified file: {file_path}")
+            print(f"[CodeAgent]   📁 Absolute path: {abs_path}")
+            
             # Read and store updated file contents
             try:
-                with open(file_path, 'r', encoding='utf-8') as f:
+                with open(abs_path, 'r', encoding='utf-8') as f:
                     content = f.read()
                     state["file_contents"][file_path] = content
-                    print(f"[CodeAgent]   📄 Read updated contents of {file_path} ({len(content)} chars)")
+                    print(f"[CodeAgent]   ✅ Successfully read updated contents ({len(content)} chars)")
             except Exception as e:
-                print(f"[CodeAgent]   ⚠️  Could not read {file_path}: {e}")
+                print(f"[CodeAgent]   ❌ ERROR reading {abs_path}: {e}")
                 state["file_contents"][file_path] = f"Error reading file: {e}"
         
         state["generated_files"] = generated
-        # ===== END NEW CODE =====
+        # ===== END FIXED CODE =====
         
         print(f"[CodeAgent] ✅ Step {current_step} complete!")
         if files_created:
