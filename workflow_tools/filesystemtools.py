@@ -9,7 +9,14 @@ from langchain_core.tools import tool
 
 # Root of the project the agents are allowed to touch.
 # You can set PROJECT_ROOT in .env, otherwise cwd is used.
-PROJECT_ROOT = Path(os.getenv("PROJECT_ROOT", Path.cwd())).resolve()
+# Always use current working directory (/app on Railway)
+# Ignore PROJECT_ROOT env var if it's a Windows path
+project_root_env = os.getenv("PROJECT_ROOT", "")
+if ":\\" in project_root_env or project_root_env.startswith("C:"):
+    # Windows path - ignore it and use current directory
+    PROJECT_ROOT = Path.cwd().resolve()
+else:
+    PROJECT_ROOT = Path(project_root_env or Path.cwd()).resolve()
 
 #PROJECT_ROOT = PROJECT_ROOT / 'Workflow_Testing'
 

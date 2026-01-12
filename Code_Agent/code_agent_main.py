@@ -183,7 +183,7 @@ def CodeAgent(state: AgentState) -> AgentState:
         generated = state.get("generated_files", [])
         
         # Get the project path from state (absolute path passed by VS Code)
-        project_path = state.get("project_path", os.getcwd())
+        project_path = os.getcwd()
         
         print(f"[CodeAgent]   📂 Project path: {project_path}")
         print(f"[CodeAgent]   📂 Current working directory: {os.getcwd()}")
