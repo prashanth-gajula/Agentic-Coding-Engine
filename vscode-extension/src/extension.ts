@@ -1,20 +1,29 @@
+import * as path from 'path';
+import * as dotenv from 'dotenv';
 import * as vscode from 'vscode';
 import { SidebarProvider } from './SidebarProvider';
 import { BackendClient } from './BackendClient';
 
 export function activate(context: vscode.ExtensionContext) {
+    // Load .env file from extension root directory
+    const envPath = path.join(context.extensionPath, '.env');
+    dotenv.config({ path: envPath });
+    
     console.log('Agentic IDE extension is now active!');
 
-    // Get backend URL from settings
+    // Get backend URL from .env, then fall back to VS Code settings, then default to localhost
     const config = vscode.workspace.getConfiguration('agenticIDE');
-    const backendUrl = config.get<string>('backendUrl') || 'https://web-production-ff3c3.up.railway.app';
+    const backendUrl = process.env.BACKEND_URL || 
+                      config.get<string>('backendUrl') || 
+                      'http://localhost:8000';
 
     // Detailed logging for backend URL
     console.log('===========================================');
     console.log('🌐 BACKEND URL CONFIGURATION:');
     console.log('Backend URL:', backendUrl);
     console.log('Config value:', config.get<string>('backendUrl'));
-    console.log('Using default?', !config.get<string>('backendUrl'));
+    console.log('Environment variable:', process.env.BACKEND_URL || 'not set');
+    console.log('Source:', process.env.BACKEND_URL ? '.env file' : (config.get<string>('backendUrl') ? 'VS Code settings' : 'default (localhost)'));
     console.log('===========================================');
 
     // Initialize backend client

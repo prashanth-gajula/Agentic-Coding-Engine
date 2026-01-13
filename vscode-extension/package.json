@@ -45,8 +45,8 @@
       "properties": {
         "agenticIDE.backendUrl": {
           "type": "string",
-          "default": "https://web-production-ff3c3.up.railway.app",
-          "description": "Backend server URL (your Python FastAPI server)"
+          "default": "http://localhost:8000",
+          "description": "Backend server URL (configure in .env file or VS Code settings for production deployments)"
         }
       }
     }
@@ -65,6 +65,7 @@
   },
   "dependencies": {
     "axios": "^1.7.9",
+    "dotenv": "^17.2.3",
     "ws": "^8.18.0"
   }
 }
