@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { BackendClient } from './BackendClient';
 
 export class SidebarProvider implements vscode.WebviewViewProvider {
@@ -132,6 +134,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 },
                 onReviewRequired: (data) => {
                     console.log('WebSocket: Review required', data);
+                    
+                    // ✅ SAVE FILES TO DISK
+                    if (data.file_contents) {
+                        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+                        if (workspaceFolder) {
+                            console.log('💾 Saving files to disk...');
+                            for (const [filename, content] of Object.entries(data.file_contents)) {
+                                try {
+                                    const filePath = path.join(workspaceFolder.uri.fsPath, filename);
+                                    fs.writeFileSync(filePath, content as string, 'utf-8');
+                                    console.log(`✅ Saved file: ${filePath}`);
+                                    
+                                    // Show success message
+                                    vscode.window.showInformationMessage(`Created: ${filename}`);
+                                } catch (err) {
+                                    console.error(`❌ Failed to save ${filename}:`, err);
+                                }
+                            }
+                        }
+                    }
+                    
                     this._view?.webview.postMessage({
                         type: 'reviewRequired',
                         plan: data.plan,
@@ -145,6 +168,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 },
                 onComplete: (data) => {
                     console.log('WebSocket: Workflow complete', data);
+                    
+                    // ✅ SAVE FILES TO DISK
+                    if (data.file_contents) {
+                        const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+                        if (workspaceFolder) {
+                            console.log('💾 Saving files to disk...');
+                            for (const [filename, content] of Object.entries(data.file_contents)) {
+                                try {
+                                    const filePath = path.join(workspaceFolder.uri.fsPath, filename);
+                                    fs.writeFileSync(filePath, content as string, 'utf-8');
+                                    console.log(`✅ Saved file: ${filePath}`);
+                                    
+                                    // Show success message
+                                    vscode.window.showInformationMessage(`Created: ${filename}`);
+                                } catch (err) {
+                                    console.error(`❌ Failed to save ${filename}:`, err);
+                                }
+                            }
+                        }
+                    }
+                    
                     this._view?.webview.postMessage({
                         type: 'workflowComplete',
                         files: data.generated_files
