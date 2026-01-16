@@ -135,19 +135,39 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 onReviewRequired: (data) => {
                     console.log('WebSocket: Review required', data);
                     
-                    // ✅ SAVE FILES TO DISK
+                    // ✅ SAVE FILES TO DISK WITH PATH FIX
                     if (data.file_contents) {
                         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
                         if (workspaceFolder) {
                             console.log('💾 Saving files to disk...');
+                            const workspaceName = path.basename(workspaceFolder.uri.fsPath);
+                            
                             for (const [filename, content] of Object.entries(data.file_contents)) {
                                 try {
-                                    const filePath = path.join(workspaceFolder.uri.fsPath, filename);
+                                    // Remove any leading directory paths that match workspace name
+                                    let cleanFilename = filename;
+                                    
+                                    // Strip workspace name from the beginning if present
+                                    if (cleanFilename.startsWith(workspaceName + '/')) {
+                                        cleanFilename = cleanFilename.substring(workspaceName.length + 1);
+                                    }
+                                    if (cleanFilename.startsWith(workspaceName + '\\')) {
+                                        cleanFilename = cleanFilename.substring(workspaceName.length + 1);
+                                    }
+                                    
+                                    const filePath = path.join(workspaceFolder.uri.fsPath, cleanFilename);
+                                    
+                                    // Create directory if it doesn't exist
+                                    const fileDir = path.dirname(filePath);
+                                    if (!fs.existsSync(fileDir)) {
+                                        fs.mkdirSync(fileDir, { recursive: true });
+                                    }
+                                    
                                     fs.writeFileSync(filePath, content as string, 'utf-8');
                                     console.log(`✅ Saved file: ${filePath}`);
                                     
                                     // Show success message
-                                    vscode.window.showInformationMessage(`Created: ${filename}`);
+                                    vscode.window.showInformationMessage(`Created: ${cleanFilename}`);
                                 } catch (err) {
                                     console.error(`❌ Failed to save ${filename}:`, err);
                                 }
@@ -169,19 +189,39 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 onComplete: (data) => {
                     console.log('WebSocket: Workflow complete', data);
                     
-                    // ✅ SAVE FILES TO DISK
+                    // ✅ SAVE FILES TO DISK WITH PATH FIX
                     if (data.file_contents) {
                         const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
                         if (workspaceFolder) {
                             console.log('💾 Saving files to disk...');
+                            const workspaceName = path.basename(workspaceFolder.uri.fsPath);
+                            
                             for (const [filename, content] of Object.entries(data.file_contents)) {
                                 try {
-                                    const filePath = path.join(workspaceFolder.uri.fsPath, filename);
+                                    // Remove any leading directory paths that match workspace name
+                                    let cleanFilename = filename;
+                                    
+                                    // Strip workspace name from the beginning if present
+                                    if (cleanFilename.startsWith(workspaceName + '/')) {
+                                        cleanFilename = cleanFilename.substring(workspaceName.length + 1);
+                                    }
+                                    if (cleanFilename.startsWith(workspaceName + '\\')) {
+                                        cleanFilename = cleanFilename.substring(workspaceName.length + 1);
+                                    }
+                                    
+                                    const filePath = path.join(workspaceFolder.uri.fsPath, cleanFilename);
+                                    
+                                    // Create directory if it doesn't exist
+                                    const fileDir = path.dirname(filePath);
+                                    if (!fs.existsSync(fileDir)) {
+                                        fs.mkdirSync(fileDir, { recursive: true });
+                                    }
+                                    
                                     fs.writeFileSync(filePath, content as string, 'utf-8');
                                     console.log(`✅ Saved file: ${filePath}`);
                                     
                                     // Show success message
-                                    vscode.window.showInformationMessage(`Created: ${filename}`);
+                                    vscode.window.showInformationMessage(`Created: ${cleanFilename}`);
                                 } catch (err) {
                                     console.error(`❌ Failed to save ${filename}:`, err);
                                 }
