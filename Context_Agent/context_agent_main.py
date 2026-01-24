@@ -35,7 +35,10 @@ def context_agent(state: AgentState) -> AgentState:
     """
     Context Agent - Plans and Coordinates Workflow (WITH MEMORY)
     """
-    
+    if state.get("done"):
+        state["next_node"] = "orchestrator"
+        state["active_agent"] = "context_agent"
+        return state
     # Initialize memory system
     state = MemoryManager.initialize_memory(state)
     

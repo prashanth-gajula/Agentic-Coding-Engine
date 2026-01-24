@@ -1,3 +1,5 @@
+# server.py (Fixed with proper generator handling)
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -7,7 +9,7 @@ from datetime import datetime
 import traceback
 
 # Import your existing workflow
-from workflow_State.workflow_main import create_workflow, create_initial_state
+from workflow_State.workflow_main import create_workflow, create_initial_state, run_workflow_with_tracing
 from workflow_State.main_state import AgentState
 
 app = FastAPI(title="Agentic IDE Backend API")
@@ -42,13 +44,17 @@ def root():
     return {
         "status": "running",
         "service": "Agentic IDE Backend",
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": datetime.utcnow().isoformat(),
+        "langsmith_tracing": os.getenv("LANGCHAIN_TRACING_V2", "false")
     }
 
 
 @app.get("/health")
 def health():
-    return {"status": "healthy"}
+    return {
+        "status": "healthy",
+        "langsmith_tracing": os.getenv("LANGCHAIN_TRACING_V2", "false")
+    }
 
 
 @app.post("/workflow/start")
@@ -64,6 +70,7 @@ async def start_workflow(req: WorkflowStartRequest):
         print(f"Starting workflow: {session_id}")
         print(f"Request: {req.request[:100]}...")
         print(f"Project: {req.project_path}")
+        print(f"LangSmith: {os.getenv('LANGCHAIN_TRACING_V2', 'false')}")
         print(f"{'='*70}\n")
         
         # Create workflow
@@ -72,6 +79,7 @@ async def start_workflow(req: WorkflowStartRequest):
         # Create initial state
         initial_state = create_initial_state(req.request)
         initial_state["project_path"] = req.project_path
+        
         # Store session
         active_sessions[session_id] = {
             "workflow": workflow_app,
@@ -152,7 +160,7 @@ async def submit_review(review: ReviewFeedbackRequest):
 
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
-    """WebSocket for real-time workflow execution"""
+    """WebSocket for real-time workflow execution with LangSmith tracing"""
     await websocket.accept()
     
     print(f"\n{'='*70}")
@@ -168,17 +176,26 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     workflow = session["workflow"]
     state = session["state"]
     
+    # Create the workflow stream generator
+    workflow_stream = None
+    
     try:
         session["status"] = "running"
         
+        # Create workflow stream WITH LANGSMITH TRACING
+        workflow_stream = run_workflow_with_tracing(
+            workflow,
+            state,
+            config={"recursion_limit": 50}
+        )
+        
+        step_idx = 0
+        
         # Stream workflow execution
-        for step_idx, step_state in enumerate(
-            workflow.stream(state, stream_mode="values", config={"recursion_limit": 50})
-        ):
+        for step_state in workflow_stream:
             # Update session state
             session["state"] = step_state
             
-            # Send update to extension
             # Send update to extension
             await websocket.send_json({
                 "type": "step_update",
@@ -186,7 +203,7 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 "current_step": step_state.get("current_step"),
                 "plan": step_state.get("plan", []),
                 "generated_files": step_state.get("generated_files", []),
-                "file_contents": step_state.get("file_contents", {}),  # ← ADD THIS LINE
+                "file_contents": step_state.get("file_contents", {}),
                 "needs_review": step_state.get("needs_review", False),
                 "done": step_state.get("done", False)
             })
@@ -194,6 +211,8 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             print(f"Step {step_idx}: {step_state.get('active_agent')} | "
                 f"Review: {step_state.get('needs_review')} | "
                 f"Done: {step_state.get('done')}")
+            
+            step_idx += 1
             
             # Pause for review
             if step_state.get("needs_review"):
@@ -206,6 +225,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 })
                 session["status"] = "paused_for_review"
                 session["paused_for_review"] = True
+                
+                # Properly close the generator
+                if workflow_stream:
+                    try:
+                        workflow_stream.close()
+                    except (GeneratorExit, StopIteration):
+                        pass  # Expected when closing generator
+                
                 break
             
             # Workflow complete
@@ -217,6 +244,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     "file_contents": step_state.get("file_contents", {})
                 })
                 session["status"] = "completed"
+                
+                # Properly close the generator
+                if workflow_stream:
+                    try:
+                        workflow_stream.close()
+                    except (GeneratorExit, StopIteration):
+                        pass  # Expected when closing generator
+                
                 break
         
         print(f"\n{'='*70}")
@@ -228,9 +263,33 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         print(f"WebSocket disconnected: {session_id}")
         session["status"] = "disconnected"
         
+        # Clean up generator
+        if workflow_stream:
+            try:
+                workflow_stream.close()
+            except (GeneratorExit, StopIteration):
+                pass
+    
+    except GeneratorExit:
+        # This is expected when generator is closed
+        print(f"Generator closed gracefully: {session_id}")
+        session["status"] = session.get("status", "completed")
+        
+    except StopIteration:
+        # Generator exhausted naturally
+        print(f"Generator completed: {session_id}")
+        session["status"] = session.get("status", "completed")
+        
     except Exception as e:
         print(f"Error in WebSocket: {e}")
         traceback.print_exc()
+        
+        # Clean up generator
+        if workflow_stream:
+            try:
+                workflow_stream.close()
+            except (GeneratorExit, StopIteration):
+                pass
         
         try:
             await websocket.send_json({
@@ -244,6 +303,14 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         session["status"] = "error"
         
     finally:
+        # Ensure generator is closed
+        if workflow_stream:
+            try:
+                workflow_stream.close()
+            except (GeneratorExit, StopIteration):
+                pass
+        
+        # Close websocket
         try:
             await websocket.close()
         except:
@@ -261,17 +328,25 @@ async def delete_session(session_id: str):
 
 
 if __name__ == "__main__":
-    import uvicorn#used to run asynchronous python web applications often with frameworks like fast API 
+    import uvicorn  # used to run asynchronous python web applications often with frameworks like fast API
     
     port = int(os.getenv("PORT", 8000))
     
     print("\n" + "="*70)
     print("🚀 Starting Agentic IDE Backend Server")
     print("="*70)
-    """print(f"Server: http://localhost:{port}")#url where we can access the app
-    print(f"WebSocket: ws://localhost:{port}/ws/{{session_id}}")#websocket endpoint url
-    print(f"Health: http://localhost:{port}/health") #checking the health of the application
-    print("="*70 + "\n")"""
+    print(f"Server: http://localhost:{port}")
+    print(f"WebSocket: ws://localhost:{port}/ws/{{session_id}}")
+    print(f"Health: http://localhost:{port}/health")
+    
+    # Show LangSmith status
+    if os.getenv("LANGCHAIN_TRACING_V2", "false").lower() == "true":
+        print(f"🔍 LangSmith: ENABLED")
+        print(f"📊 Project: {os.getenv('LANGCHAIN_PROJECT', 'default')}")
+    else:
+        print(f"⚠️  LangSmith: DISABLED (set LANGCHAIN_TRACING_V2=true to enable)")
+    
+    print("="*70 + "\n")
     
     uvicorn.run(
         app,

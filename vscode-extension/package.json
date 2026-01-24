@@ -3,9 +3,9 @@
   "displayName": "Agentic IDE",
   "description": "AI-powered coding assistant with multi-agent workflow",
   "version": "0.1.0",
-  "publisher": "Prashanth Kumar Gajula",
+  "publisher": "Prashanth-Kumar-Gajula",
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.107.0"
   },
   "categories": [
     "Other",
@@ -45,7 +45,7 @@
       "properties": {
         "agenticIDE.backendUrl": {
           "type": "string",
-          "default": "http://localhost:8000",
+          "default": "https://web-production-ff3c3.up.railway.app",
           "description": "Backend server URL (configure in .env file or VS Code settings for production deployments)"
         }
       }

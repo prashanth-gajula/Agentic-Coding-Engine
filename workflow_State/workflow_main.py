@@ -1,5 +1,10 @@
+# workflow_main.py (Better fix - yield immediately without buffering)
+from langchain_core.tracers.langchain import LangChainTracer
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage
+from langchain_core.tracers.context import tracing_v2_enabled
+import os
+import contextlib
 
 from workflow_State.main_state import AgentState
 
@@ -42,6 +47,7 @@ def orchestrator_router(state: AgentState) -> str:
 
 
 def create_workflow():
+    """Create the workflow graph"""
     graph = StateGraph(AgentState)
 
     # Add all nodes
@@ -49,7 +55,7 @@ def create_workflow():
     graph.add_node("context_agent", context_agent)
     graph.add_node("code_agent", CodeAgent)
     graph.add_node("debug_agent", DebugAgent)
-    graph.add_node("reviewer_agent", ReviewerAgent)  # NEW
+    graph.add_node("reviewer_agent", ReviewerAgent)
 
     # Entry point: start at orchestrator
     graph.set_entry_point("orchestrator")
@@ -71,7 +77,7 @@ def create_workflow():
         {
             "code_agent": "code_agent",
             "debug_agent": "debug_agent",
-            "reviewer_agent": "reviewer_agent",  # NEW
+            "reviewer_agent": "reviewer_agent",
             "orchestrator": "orchestrator",
         },
     )
@@ -79,12 +85,12 @@ def create_workflow():
     # All workers return to context_agent
     graph.add_edge("code_agent", "context_agent")
     graph.add_edge("debug_agent", "context_agent")
-    #graph.add_edge("document_agent", "context_agent")
     
     # Reviewer also returns to context_agent
-    graph.add_edge("reviewer_agent", "context_agent")  # NEW
+    graph.add_edge("reviewer_agent", "context_agent")
 
     return graph.compile()
+
 
 def create_initial_state(user_request: str) -> AgentState:
     """
@@ -123,68 +129,104 @@ def create_initial_state(user_request: str) -> AgentState:
         "expected_file_count": 0,
         "needs_review": False,
         "user_feedback": None,
-        "file_contents": {},  # ← ADD THIS LINE
-        "project_path": None,  # ← ADD THIS LINE
+        "file_contents": {},
+        "project_path": None,
         "conversation_history": [],
         "recent_files": [],
         "current_working_file": None,
         "reference_context": {}
     }
+
+
+# ============================================
+# LangSmith Tracing Helper Functions
+# ============================================
+
+def get_langsmith_config():
+    """Get LangSmith configuration from environment"""
+    return {
+        "project_name": os.getenv("LANGCHAIN_PROJECT", "agentic-ide-workflow"),
+        "tags": ["agentic-workflow", "vs-code-extension"],
+    }
+
+
+# workflow_main.py
+
+def run_workflow_with_tracing(app, initial_state, config=None):
+    """
+    Execute workflow with LangSmith tracing using callbacks.
+    """
+    langsmith_config = get_langsmith_config()
+    
+    tracing_enabled = os.getenv("LANGCHAIN_TRACING_V2", "false").lower() == "true"
+    
+    if tracing_enabled:
+        print("🔍 LangSmith tracing enabled")
+        print(f"📊 Project: {langsmith_config['project_name']}")
+    else:
+        print("⚠️  LangSmith tracing disabled")
+    
+    run_config = config or {}
+    
+    tracer = None
+    if tracing_enabled:
+        tracer = LangChainTracer(project_name=langsmith_config["project_name"])
+        run_config["callbacks"] = [tracer]
+    
+    run_config.update({
+        "run_name": f"workflow_{initial_state.get('user_request', '')[:50]}",
+        "tags": langsmith_config["tags"],
+    })
+    
+    try:
+        # Stream all states
+        for state in app.stream(initial_state, stream_mode="values", config=run_config):
+            yield state
+    finally:
+        # Ensure tracer is properly closed
+        if tracer is not None:
+            try:
+                # Wait for tracer to finish
+                tracer.wait_for_futures()
+            except Exception as e:
+                print(f"Note: Tracer cleanup issue (non-critical): {e}")
+
+
 """
 ---->This is for local testing<-----
 the input for the workflow is handled by the fast API this is just to test the agentic workflow.
+"""
 if __name__ == "__main__":
+    # Load environment variables for local testing
+    from dotenv import load_dotenv
+    load_dotenv()
+    
     app = create_workflow()
 
     initial_user_request = "can you create me a python code to connect to pinecone vector database and a langchain agent that uses this vector database as one of the tool i need these two in different files and the titles of these files need to be based on their functionality."
     
-    # Other example requests:
-    # initial_user_request = "the pinecone_connection file is empty can you pls complete this file i need the index creation and chunking of the files and storing them in the index and in the langchain agent i need code just to connect to this pinecone vectorstore and perform retrival and ans completion i wnat langchain to use stuffed document chain to connect to the pinecone index."
-    # initial_user_request = "can you change the function names in calculator.py file using the imp terms from bahubali move the names of the functions should represent the popular characters or famous ideogoly in the movie."
-    
-    initial_state: AgentState = {
-        "messages": [HumanMessage(content=initial_user_request)],
-        "user_request": initial_user_request,
-        "task_type": "other",
-        "target_files": [],
-        "focus_symbol": None,
-        "error_message": None,
-        "stack_trace": None,
-        "test_command": None,
-        "last_test_output": None,
-        "last_diff": None,
-        "active_agent": "orchestrator",
-        "done": False,
-        "plan": [],
-        "current_step": 0,
-        "current_task": "",
-        "next_node": "context_agent",
-        "final_summary": "",
-        "generated_files": [],
-        "last_code_agent_output": "",
-        "target_file": None,
-        "worker_completed": False,
-        "expected_file_count": 0,
-        "needs_review": False,  # NEW - for reviewer agent
-        "user_feedback": None,  # NEW - stores human feedback
-    }
+    initial_state = create_initial_state(initial_user_request)
 
-    print("=== Starting workflow ===")
+    print("=== Starting workflow with LangSmith tracing ===")
     print("Initial user request:", initial_user_request)
     print("------------------------")
 
     final_state = None
 
-    # Stream the graph execution step by step
+    # Stream the graph execution step by step WITH TRACING
     for step_idx, state in enumerate(
-        app.stream(initial_state, stream_mode="values", config={"recursion_limit": 50})
+        run_workflow_with_tracing(
+            app, 
+            initial_state, 
+            config={"recursion_limit": 50}
+        )
     ):
         print(f"\n--- STEP {step_idx} ---")
         print("active_agent:", state.get("active_agent"))
         print("task_type:", state.get("task_type"))
         print("done:", state.get("done"))
         print("current_step:", state.get("current_step"))
-        print("needs_review:", state.get("needs_review"))  # NEW - show review status
+        print("needs_review:", state.get("needs_review"))
         print("generated_files:", state.get("generated_files", []))
 
         # Show last message content (truncated) if available
@@ -196,11 +238,12 @@ if __name__ == "__main__":
                 print("last_message:", short + ("..." if len(content) > 150 else ""))
 
         final_state = state
-
+        """
         # Optional: break early if done
         if state.get("done"):
             print("\n✅ Workflow complete!")
             break
+        """
 
     print("\n=== FINAL STATE ===")
     if final_state:
@@ -211,4 +254,3 @@ if __name__ == "__main__":
             print("User feedback received:", final_state.get("user_feedback"))
     else:
         print("No state returned.")
-"""
