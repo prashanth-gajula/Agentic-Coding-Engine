@@ -1,4 +1,4 @@
-# server.py (Complete with LangSmith tracing - Fixed)
+# server.py (Complete with checkpointing support)
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,7 +59,7 @@ def health():
 
 @app.post("/workflow/start")
 async def start_workflow(req: WorkflowStartRequest):
-    """Start a new workflow session"""
+    """Start a new workflow session with checkpointing"""
     try:
         session_id = f"session_{datetime.now().timestamp()}"
         
@@ -73,19 +73,20 @@ async def start_workflow(req: WorkflowStartRequest):
         print(f"LangSmith: {os.getenv('LANGCHAIN_TRACING_V2', 'false')}")
         print(f"{'='*70}\n")
         
-        # Create workflow
+        # Create workflow with checkpointing
         workflow_app = create_workflow()
         
-        # Create initial state
-        initial_state = create_initial_state(req.request)
+        # ✅ Create initial state (skip_review=False for production)
+        initial_state = create_initial_state(req.request, skip_review=False)
         initial_state["project_path"] = req.project_path
         
-        # Store session
+        # ✅ Store session with thread_id for checkpointing
         active_sessions[session_id] = {
             "workflow": workflow_app,
             "state": initial_state,
             "status": "created",
-            "project_path": req.project_path
+            "project_path": req.project_path,
+            "thread_id": session_id  # Use session_id as thread_id
         }
         
         return {
@@ -102,12 +103,13 @@ async def start_workflow(req: WorkflowStartRequest):
 
 @app.post("/workflow/review")
 async def submit_review(review: ReviewFeedbackRequest):
-    """Submit review feedback and continue workflow if needed"""
+    """Submit review feedback and update checkpoint"""
     if review.session_id not in active_sessions:
         raise HTTPException(status_code=404, detail="Session not found")
     
     session = active_sessions[review.session_id]
-    state = session["state"]
+    workflow = session["workflow"]
+    thread_id = session["thread_id"]
     
     print(f"\n{'='*70}")
     print(f"Review feedback: {review.session_id}")
@@ -123,44 +125,49 @@ async def submit_review(review: ReviewFeedbackRequest):
         any(kw in review.feedback.lower() for kw in approval_keywords)
     )
     
-    if is_approval:
-        # User approved - workflow complete
-        print("✅ User approved work - ending workflow")
-        state["done"] = True
-        state["needs_review"] = False
-        session["status"] = "completed"
-    else:
-        # User requested changes - create new plan
-        print("🔄 User requested changes - resetting for new plan")
-        
-        original_request = state.get("user_request", "")
-        previous_work = "Previous work completed:\n"
-        for step in state.get("plan", []):
-            previous_work += f"- {step.get('instruction', '')} ({step.get('target_file', 'N/A')})\n"
-        
-        # Build new request incorporating feedback
-        new_request = f"{previous_work}\nUser feedback/changes requested:\n{review.feedback}\n\nOriginal request: {original_request}"
-        
-        # Reset state for new workflow
-        state["user_request"] = new_request
-        state["user_feedback"] = review.feedback
-        state["needs_review"] = False
-        state["plan"] = []  # Clear - context agent will create new plan
-        state["current_step"] = 0
-        state["worker_completed"] = False
-        state["next_node"] = "context_agent"
-        state["done"] = False
-        
-        # Mark session as running so WebSocket can continue
-        session["status"] = "running"
-        session["paused_for_review"] = False
+    # ✅ Update the checkpointed state using LangGraph's update_state
+    config = {"configurable": {"thread_id": thread_id}}
     
-    return {"status": "success", "workflow_done": state["done"]}
+    try:
+        if is_approval:
+            print("✅ User approved - updating checkpoint")
+            # ✅ Update checkpoint with approval
+            workflow.update_state(
+                config,
+                {
+                    "user_feedback": "approved",
+                    "done": True,
+                    "needs_review": False
+                }
+            )
+            session["status"] = "resuming"
+        else:
+            print("🔄 User requested changes - updating checkpoint")
+            # ✅ Update checkpoint with feedback for changes
+            workflow.update_state(
+                config,
+                {
+                    "user_feedback": review.feedback,
+                    "needs_review": False,
+                    "done": False
+                }
+            )
+            session["status"] = "resuming"
+        
+        return {
+            "status": "success",
+            "message": "Feedback received, workflow will resume"
+        }
+        
+    except Exception as e:
+        print(f"Error updating checkpoint: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to update checkpoint: {str(e)}")
 
 
 @app.websocket("/ws/{session_id}")
 async def websocket_endpoint(websocket: WebSocket, session_id: str):
-    """WebSocket for real-time workflow execution with LangSmith tracing"""
+    """WebSocket for real-time workflow execution with checkpointing"""
     await websocket.accept()
     
     print(f"\n{'='*70}")
@@ -174,16 +181,33 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     
     session = active_sessions[session_id]
     workflow = session["workflow"]
-    state = session["state"]
+    initial_state = session.get("state")
+    thread_id = session["thread_id"]
     
     try:
-        session["status"] = "running"
+        # ✅ Determine if this is initial run or resuming from checkpoint
+        is_resuming = session.get("status") == "resuming"
         
-        # Create workflow stream WITH LANGSMITH TRACING
+        if is_resuming:
+            print(f"▶️  Resuming workflow from checkpoint...")
+            session["status"] = "running"
+            stream_state = None  # None = resume from checkpoint
+        else:
+            print(f"▶️  Starting new workflow...")
+            session["status"] = "running"
+            stream_state = initial_state  # Start with initial state
+        
+        # ✅ Config with thread_id for checkpointing
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": 50
+        }
+        
+        # Create workflow stream WITH LANGSMITH TRACING AND CHECKPOINTING
         workflow_stream = run_workflow_with_tracing(
             workflow,
-            state,
-            config={"recursion_limit": 50}
+            stream_state,  # None if resuming, initial_state if starting
+            config=config
         )
         
         step_idx = 0
@@ -211,9 +235,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             
             step_idx += 1
             
-            # Pause for review (only if review needed AND not done)
+            # ✅ Check if workflow is paused for review (due to interrupt)
             if step_state.get("needs_review") and not step_state.get("done"):
-                print(f"\n⏸️  Workflow paused for review")
+                print(f"\n⏸️  Workflow interrupted for review (checkpoint saved)")
                 await websocket.send_json({
                     "type": "review_required",
                     "plan": step_state.get("plan", []),
@@ -221,11 +245,12 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                     "file_contents": step_state.get("file_contents", {})
                 })
                 session["status"] = "paused_for_review"
-                session["paused_for_review"] = True
-                break  # Only break for review, not for done
+                # ✅ Workflow is paused via interrupt() - generator stops naturally
+                # Loop will end when interrupt stops yielding states
         
-        # After loop ends naturally, check final state
+        # After loop ends, check final state
         final_state = session.get("state", {})
+        
         if final_state.get("done"):
             print(f"\n✅ Workflow completed")
             await websocket.send_json({
@@ -234,6 +259,9 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 "file_contents": final_state.get("file_contents", {})
             })
             session["status"] = "completed"
+        elif final_state.get("needs_review"):
+            print(f"\n⏸️  Workflow paused - waiting for review")
+            session["status"] = "paused_for_review"
         
         print(f"\n{'='*70}")
         print(f"WebSocket stream ended: {session_id}")
@@ -244,16 +272,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         print(f"WebSocket disconnected: {session_id}")
         session["status"] = "disconnected"
     
-    except GeneratorExit:
-        # This is expected when generator is closed
-        print(f"Generator closed gracefully: {session_id}")
-        session["status"] = session.get("status", "completed")
-        
-    except StopIteration:
-        # Generator exhausted naturally
-        print(f"Generator completed: {session_id}")
-        session["status"] = session.get("status", "completed")
-        
     except Exception as e:
         print(f"Error in WebSocket: {e}")
         traceback.print_exc()
@@ -270,7 +288,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         session["status"] = "error"
         
     finally:
-        # Close websocket
         try:
             await websocket.close()
         except:

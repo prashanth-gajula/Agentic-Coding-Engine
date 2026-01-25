@@ -1,10 +1,9 @@
-# workflow_main.py (Better fix - yield immediately without buffering)
+# workflow_main.py (Updated with checkpointing support)
 from langchain_core.tracers.langchain import LangChainTracer
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage
-from langchain_core.tracers.context import tracing_v2_enabled
+from langgraph.checkpoint.memory import MemorySaver  # ← Add this import
 import os
-import contextlib
 
 from workflow_State.main_state import AgentState
 
@@ -47,7 +46,7 @@ def orchestrator_router(state: AgentState) -> str:
 
 
 def create_workflow():
-    """Create the workflow graph"""
+    """Create the workflow graph with checkpointing support"""
     graph = StateGraph(AgentState)
 
     # Add all nodes
@@ -89,10 +88,12 @@ def create_workflow():
     # Reviewer also returns to context_agent
     graph.add_edge("reviewer_agent", "context_agent")
 
-    return graph.compile()
+    # ✅ Compile WITH checkpointer for pause/resume support
+    checkpointer = MemorySaver()
+    return graph.compile(checkpointer=checkpointer)
 
 
-def create_initial_state(user_request: str) -> AgentState:
+def create_initial_state(user_request: str, skip_review: bool = False) -> AgentState:
     """
     Helper function to create initial state for a workflow.
     
@@ -100,6 +101,7 @@ def create_initial_state(user_request: str) -> AgentState:
     
     Args:
         user_request: The task description from the user
+        skip_review: If True, skip review step (for local testing)
         
     Returns:
         Initial state dictionary for the workflow
@@ -134,7 +136,8 @@ def create_initial_state(user_request: str) -> AgentState:
         "conversation_history": [],
         "recent_files": [],
         "current_working_file": None,
-        "reference_context": {}
+        "reference_context": {},
+        "skip_review": skip_review  # ✅ Add skip_review flag
     }
 
 
@@ -150,11 +153,18 @@ def get_langsmith_config():
     }
 
 
-# workflow_main.py
-
 def run_workflow_with_tracing(app, initial_state, config=None):
     """
     Execute workflow with LangSmith tracing using callbacks.
+    Supports checkpointing for pause/resume.
+    
+    Args:
+        app: Compiled workflow graph (with checkpointer)
+        initial_state: Initial state dictionary OR None to resume from checkpoint
+        config: Must include thread_id for checkpointing (e.g., {"configurable": {"thread_id": "session_123"}})
+    
+    Yields:
+        State updates from workflow execution
     """
     langsmith_config = get_langsmith_config()
     
@@ -173,20 +183,23 @@ def run_workflow_with_tracing(app, initial_state, config=None):
         tracer = LangChainTracer(project_name=langsmith_config["project_name"])
         run_config["callbacks"] = [tracer]
     
-    run_config.update({
-        "run_name": f"workflow_{initial_state.get('user_request', '')[:50]}",
-        "tags": langsmith_config["tags"],
-    })
+    # Add tags
+    if "tags" not in run_config:
+        run_config["tags"] = []
+    run_config["tags"].extend(langsmith_config["tags"])
+    
+    # Add run name if not resuming (initial_state is not None)
+    if initial_state is not None:
+        run_config["run_name"] = f"workflow_{initial_state.get('user_request', '')[:50]}"
     
     try:
-        # Stream all states
-        for state in app.stream(initial_state, stream_mode="values", config=run_config):
+        # Stream with checkpointing support
+        for state in app.stream(initial_state, config=run_config, stream_mode="values"):
             yield state
     finally:
         # Ensure tracer is properly closed
         if tracer is not None:
             try:
-                # Wait for tracer to finish
                 tracer.wait_for_futures()
             except Exception as e:
                 print(f"Note: Tracer cleanup issue (non-critical): {e}")
@@ -195,7 +208,7 @@ def run_workflow_with_tracing(app, initial_state, config=None):
 """
 ---->This is for local testing<-----
 the input for the workflow is handled by the fast API this is just to test the agentic workflow.
-"""
+
 if __name__ == "__main__":
     # Load environment variables for local testing
     from dotenv import load_dotenv
@@ -205,20 +218,28 @@ if __name__ == "__main__":
 
     initial_user_request = "can you create me a python code to connect to pinecone vector database and a langchain agent that uses this vector database as one of the tool i need these two in different files and the titles of these files need to be based on their functionality."
     
-    initial_state = create_initial_state(initial_user_request)
+    # ✅ For local testing, skip review to avoid blocking
+    initial_state = create_initial_state(initial_user_request, skip_review=True)
 
     print("=== Starting workflow with LangSmith tracing ===")
     print("Initial user request:", initial_user_request)
+    print("⚠️  Review step will be SKIPPED (local testing mode)")
     print("------------------------")
 
     final_state = None
+    
+    # ✅ Thread ID for checkpointing (required)
+    config = {
+        "configurable": {"thread_id": "local_test_session"},
+        "recursion_limit": 50
+    }
 
     # Stream the graph execution step by step WITH TRACING
     for step_idx, state in enumerate(
         run_workflow_with_tracing(
             app, 
             initial_state, 
-            config={"recursion_limit": 50}
+            config=config  # ✅ Pass config with thread_id
         )
     ):
         print(f"\n--- STEP {step_idx} ---")
@@ -238,12 +259,6 @@ if __name__ == "__main__":
                 print("last_message:", short + ("..." if len(content) > 150 else ""))
 
         final_state = state
-        """
-        # Optional: break early if done
-        if state.get("done"):
-            print("\n✅ Workflow complete!")
-            break
-        """
 
     print("\n=== FINAL STATE ===")
     if final_state:
@@ -254,3 +269,4 @@ if __name__ == "__main__":
             print("User feedback received:", final_state.get("user_feedback"))
     else:
         print("No state returned.")
+"""

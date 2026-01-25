@@ -1,19 +1,37 @@
+# reviewer_agent_main.py (Updated with checkpointing and interrupt support)
+
 from workflow_State.main_state import AgentState
+from langgraph.types import interrupt  # ✅ Add this import
 
 
 def ReviewerAgent(state: AgentState) -> AgentState:
     """
-    Reviewer Agent - Human-in-the-Loop Review (after entire plan completes)
+    Reviewer Agent - Human-in-the-Loop Review (Checkpointing-based)
     
     Called by Context Agent after ALL steps complete.
     
+    Uses LangGraph's interrupt() to pause workflow and wait for external input.
+    In production (WebSocket): Pauses and waits for user feedback via API
+    In local testing: Skips review if skip_review=True
+    
     Responsibilities:
     1. Display summary of all completed work
-    2. Get direct user feedback (free-form text input)
+    2. Interrupt workflow and wait for user feedback
     3. Based on feedback:
        - Empty/approval keywords: End workflow
        - Specific feedback: Create new plan, return to context_agent
     """
+    
+    # ✅ Check if review should be skipped (for local testing)
+    if state.get("skip_review", False):
+        print("\n" + "=" * 70)
+        print("⏭️  REVIEW SKIPPED (skip_review=True)")
+        print("=" * 70)
+        state["needs_review"] = False
+        state["done"] = True
+        state["next_node"] = "orchestrator"
+        state["active_agent"] = "reviewer_agent"
+        return state
     
     plan = state.get("plan", [])
     generated_files = state.get("generated_files", [])
@@ -39,18 +57,35 @@ def ReviewerAgent(state: AgentState) -> AgentState:
         for file in generated_files:
             print(f"   ✓ {file}")
     
-    # Get user feedback
     print("\n" + "=" * 70)
-    print("💬 REVIEW FEEDBACK")
-    print("=" * 70)
-    print("\nPlease review the completed work above.")
-    print("\nProvide your feedback:")
-    print("  • Press ENTER (empty) to approve and END the workflow")
-    print("  • Type 'looks good', 'approve', 'done', or 'ok' to END the workflow")
-    print("  • Type specific feedback/changes to create a NEW plan and continue")
+    print("💬 REVIEW FEEDBACK REQUIRED")
     print("=" * 70)
     
-    feedback = input("\nYour feedback: ").strip()
+    # ✅ Set flag and INTERRUPT workflow (pauses here until update_state)
+    state["needs_review"] = True
+    state["active_agent"] = "reviewer_agent"
+    
+    print("\n⏸️  Workflow INTERRUPTED - waiting for user review...")
+    print("    (In production: user will review via VS Code extension)")
+    print("    (In local: would use input(), but skip_review=True should be used)")
+    print("=" * 70)
+    
+    # ✅ This pauses the workflow and saves checkpoint
+    # Execution stops here until workflow.update_state() is called
+    interrupt("User review required - waiting for feedback")
+    
+    # ============================================================
+    # EXECUTION RESUMES HERE after update_state()
+    # ============================================================
+    
+    print("\n" + "=" * 70)
+    print("▶️  Workflow RESUMED - processing user feedback...")
+    print("=" * 70)
+    
+    # ✅ Get feedback that was provided via update_state()
+    feedback = state.get("user_feedback", "")
+    
+    print(f"\n✅ Received feedback: {feedback[:100] if feedback else '(empty - approved)'}")
     
     # Parse feedback
     approval_keywords = ['looks good', 'approve', 'approved', 'done', 'ok', 'good', 'lgtm', 'perfect']
@@ -75,7 +110,7 @@ def ReviewerAgent(state: AgentState) -> AgentState:
         # ============================================================
         # REQUEST CHANGES - Create new plan
         # ============================================================
-        print(f"\n🔄 Creating new plan based on your feedback...")
+        print(f"\n🔄 Creating new plan based on feedback...")
         print(f"Feedback: {feedback}")
         
         # Create new user request incorporating feedback
