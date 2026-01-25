@@ -96,24 +96,34 @@ def create_workflow():
     return graph.compile(checkpointer=checkpointer)
 
 def get_checkpointer():
+    """
+    Get the appropriate checkpointer based on environment.
+    Uses PostgreSQL in production, in-memory for local testing without DB.
+    """
     database_url = os.getenv("DATABASE_URL")
     
     if database_url:
+        # Production: Use PostgreSQL
         print("🗄️  Using PostgreSQL checkpointer")
         try:
             from langgraph.checkpoint.postgres import PostgresSaver
             
-            # Create connection and setup tables
+            # ✅ FIX: Use context manager to get the connection, then return it
             conn = PostgresSaver.from_conn_string(database_url)
             
-            # Setup is called automatically when used, but we can also call it explicitly
-            try:
-                conn.setup()
-            except AttributeError:
-                # If setup() doesn't exist, tables will be created on first use
-                pass
+            # The from_conn_string returns a context manager
+            # We need to enter it to get the actual saver
+            if hasattr(conn, '__enter__'):
+                # It's a context manager, enter it
+                checkpointer = conn.__enter__()
+            else:
+                # It's already a checkpointer
+                checkpointer = conn
             
-            return conn
+            # Setup tables
+            checkpointer.setup()
+            
+            return checkpointer
             
         except Exception as e:
             print(f"⚠️  Failed to connect to PostgreSQL: {e}")
@@ -121,6 +131,7 @@ def get_checkpointer():
             from langgraph.checkpoint.memory import MemorySaver
             return MemorySaver()
     else:
+        # Local testing: Use in-memory checkpointer
         print("⚠️  DATABASE_URL not found - using in-memory checkpointer")
         print("⚠️  Checkpoints will not persist across restarts")
         from langgraph.checkpoint.memory import MemorySaver
