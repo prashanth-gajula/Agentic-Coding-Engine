@@ -2,7 +2,8 @@
 from langchain_core.tracers.langchain import LangChainTracer
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import HumanMessage
-from langgraph.checkpoint.memory import MemorySaver  # ← Add this import
+#from langgraph.checkpoint.memory import MemorySaver  # ← Add this import
+from langgraph.checkpoint.postgres import PostgresSaver
 import os
 
 from workflow_State.main_state import AgentState
@@ -89,9 +90,42 @@ def create_workflow():
     graph.add_edge("reviewer_agent", "context_agent")
 
     # ✅ Compile WITH checkpointer for pause/resume support
-    checkpointer = MemorySaver()
+    #checkpointer = MemorySaver()
+    #return graph.compile(checkpointer=checkpointer)
+    checkpointer = get_checkpointer()
     return graph.compile(checkpointer=checkpointer)
 
+def get_checkpointer():
+    """
+    Get the appropriate checkpointer based on environment.
+    Uses PostgreSQL in production, in-memory for local testing without DB.
+    """
+    database_url = os.getenv("DATABASE_URL")
+    
+    if database_url:
+        # Production: Use PostgreSQL
+        print("🗄️  Using PostgreSQL checkpointer")
+        try:
+            from langgraph.checkpoint.postgres import PostgresSaver
+            
+            # Create PostgreSQL checkpointer
+            checkpointer = PostgresSaver.from_conn_string(database_url)
+            
+            # Initialize the database tables (first time only)
+            checkpointer.setup()
+            
+            return checkpointer
+        except Exception as e:
+            print(f"⚠️  Failed to connect to PostgreSQL: {e}")
+            print("⚠️  Falling back to in-memory checkpointer")
+            from langgraph.checkpoint.memory import MemorySaver
+            return MemorySaver()
+    else:
+        # Local testing: Use in-memory checkpointer
+        print("⚠️  DATABASE_URL not found - using in-memory checkpointer")
+        print("⚠️  Checkpoints will not persist across restarts")
+        from langgraph.checkpoint.memory import MemorySaver
+        return MemorySaver()
 
 def create_initial_state(user_request: str, skip_review: bool = False) -> AgentState:
     """

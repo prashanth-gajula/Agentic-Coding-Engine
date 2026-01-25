@@ -49,13 +49,35 @@ def root():
     }
 
 
-@app.get("/health")
+"""@app.get("/health")
 def health():
     return {
         "status": "healthy",
         "langsmith_tracing": os.getenv("LANGCHAIN_TRACING_V2", "false")
     }
-
+"""
+@app.get("/health")
+def health():
+    status = {
+        "status": "healthy",
+        "langsmith_tracing": os.getenv("LANGCHAIN_TRACING_V2", "false"),
+        "active_sessions": len(active_sessions),
+        "database": "not_configured"
+    }
+    
+    # Check database connection
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        try:
+            from langgraph.checkpoint.postgres import PostgresSaver
+            checkpointer = PostgresSaver.from_conn_string(database_url)
+            checkpointer.setup()
+            status["database"] = "connected"
+        except Exception as e:
+            status["database"] = f"error: {str(e)}"
+            status["status"] = "degraded"
+    
+    return status
 
 @app.post("/workflow/start")
 async def start_workflow(req: WorkflowStartRequest):

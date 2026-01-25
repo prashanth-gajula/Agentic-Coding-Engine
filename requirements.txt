@@ -8,3 +8,5 @@ websockets==12.0
 python-multipart
 guardrails-ai
 langsmith
+langgraph-checkpoint-postgres
+psycopg
