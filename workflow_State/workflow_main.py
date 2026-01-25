@@ -107,26 +107,26 @@ def get_checkpointer():
         print("🗄️  Using PostgreSQL checkpointer")
         try:
             from langgraph.checkpoint.postgres import PostgresSaver
+            import psycopg
             
-            # ✅ FIX: Use context manager to get the connection, then return it
-            conn = PostgresSaver.from_conn_string(database_url)
+            # ✅ Create a connection pool that stays open
+            # This keeps the connection alive for the lifetime of the application
+            conn = psycopg.connect(database_url)
             
-            # The from_conn_string returns a context manager
-            # We need to enter it to get the actual saver
-            if hasattr(conn, '__enter__'):
-                # It's a context manager, enter it
-                checkpointer = conn.__enter__()
-            else:
-                # It's already a checkpointer
-                checkpointer = conn
+            # Create the checkpointer with the connection
+            checkpointer = PostgresSaver(conn)
             
             # Setup tables
             checkpointer.setup()
             
+            print("✅ PostgreSQL checkpointer initialized")
             return checkpointer
             
         except Exception as e:
             print(f"⚠️  Failed to connect to PostgreSQL: {e}")
+            print(f"⚠️  Error type: {type(e).__name__}")
+            import traceback
+            traceback.print_exc()
             print("⚠️  Falling back to in-memory checkpointer")
             from langgraph.checkpoint.memory import MemorySaver
             return MemorySaver()

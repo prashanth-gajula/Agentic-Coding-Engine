@@ -69,10 +69,17 @@ def health():
     database_url = os.getenv("DATABASE_URL")
     if database_url:
         try:
+            import psycopg
             from langgraph.checkpoint.postgres import PostgresSaver
-            # Use context manager properly
-            with PostgresSaver.from_conn_string(database_url) as checkpointer:
-                checkpointer.setup()
+            
+            # Test connection
+            conn = psycopg.connect(database_url)
+            checkpointer = PostgresSaver(conn)
+            checkpointer.setup()
+            
+            # Close test connection
+            conn.close()
+            
             status["database"] = "connected"
         except Exception as e:
             status["database"] = f"error: {str(e)}"
