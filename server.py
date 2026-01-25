@@ -1,4 +1,4 @@
-# server.py (Fixed with proper generator handling)
+# server.py (Complete with LangSmith tracing - Fixed)
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -176,9 +176,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     workflow = session["workflow"]
     state = session["state"]
     
-    # Create the workflow stream generator
-    workflow_stream = None
-    
     try:
         session["status"] = "running"
         
@@ -209,13 +206,13 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             })
             
             print(f"Step {step_idx}: {step_state.get('active_agent')} | "
-                f"Review: {step_state.get('needs_review')} | "
-                f"Done: {step_state.get('done')}")
+                  f"Review: {step_state.get('needs_review')} | "
+                  f"Done: {step_state.get('done')}")
             
             step_idx += 1
             
-            # Pause for review
-            if step_state.get("needs_review"):
+            # Pause for review (only if review needed AND not done)
+            if step_state.get("needs_review") and not step_state.get("done"):
                 print(f"\n⏸️  Workflow paused for review")
                 await websocket.send_json({
                     "type": "review_required",
@@ -225,34 +222,18 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
                 })
                 session["status"] = "paused_for_review"
                 session["paused_for_review"] = True
-                
-                # Properly close the generator
-                if workflow_stream:
-                    try:
-                        workflow_stream.close()
-                    except (GeneratorExit, StopIteration):
-                        pass  # Expected when closing generator
-                
-                break
-            
-            # Workflow complete
-            if step_state.get("done"):
-                print(f"\n✅ Workflow completed")
-                await websocket.send_json({
-                    "type": "workflow_complete",
-                    "generated_files": step_state.get("generated_files", []),
-                    "file_contents": step_state.get("file_contents", {})
-                })
-                session["status"] = "completed"
-                
-                # Properly close the generator
-                if workflow_stream:
-                    try:
-                        workflow_stream.close()
-                    except (GeneratorExit, StopIteration):
-                        pass  # Expected when closing generator
-                
-                break
+                break  # Only break for review, not for done
+        
+        # After loop ends naturally, check final state
+        final_state = session.get("state", {})
+        if final_state.get("done"):
+            print(f"\n✅ Workflow completed")
+            await websocket.send_json({
+                "type": "workflow_complete",
+                "generated_files": final_state.get("generated_files", []),
+                "file_contents": final_state.get("file_contents", {})
+            })
+            session["status"] = "completed"
         
         print(f"\n{'='*70}")
         print(f"WebSocket stream ended: {session_id}")
@@ -262,13 +243,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
     except WebSocketDisconnect:
         print(f"WebSocket disconnected: {session_id}")
         session["status"] = "disconnected"
-        
-        # Clean up generator
-        if workflow_stream:
-            try:
-                workflow_stream.close()
-            except (GeneratorExit, StopIteration):
-                pass
     
     except GeneratorExit:
         # This is expected when generator is closed
@@ -284,13 +258,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         print(f"Error in WebSocket: {e}")
         traceback.print_exc()
         
-        # Clean up generator
-        if workflow_stream:
-            try:
-                workflow_stream.close()
-            except (GeneratorExit, StopIteration):
-                pass
-        
         try:
             await websocket.send_json({
                 "type": "error",
@@ -303,13 +270,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         session["status"] = "error"
         
     finally:
-        # Ensure generator is closed
-        if workflow_stream:
-            try:
-                workflow_stream.close()
-            except (GeneratorExit, StopIteration):
-                pass
-        
         # Close websocket
         try:
             await websocket.close()
