@@ -109,21 +109,25 @@ def get_checkpointer():
             from langgraph.checkpoint.postgres import PostgresSaver
             import psycopg
             
-            # ✅ Create a connection pool that stays open
-            # This keeps the connection alive for the lifetime of the application
-            conn = psycopg.connect(database_url)
+            # Create a connection with autocommit enabled
+            print("📡 Connecting to PostgreSQL...")
+            conn = psycopg.connect(database_url, autocommit=True)  # ✅ Add autocommit=True
+            print("✅ Connected to PostgreSQL (autocommit enabled)")
             
             # Create the checkpointer with the connection
+            print("🔧 Creating PostgresSaver...")
             checkpointer = PostgresSaver(conn)
             
             # Setup tables
+            print("📋 Setting up checkpoint tables...")
             checkpointer.setup()
+            print("✅ Checkpoint tables ready")
             
-            print("✅ PostgreSQL checkpointer initialized")
+            print("✅ PostgreSQL checkpointer initialized successfully")
             return checkpointer
             
         except Exception as e:
-            print(f"⚠️  Failed to connect to PostgreSQL: {e}")
+            print(f"❌ Failed to connect to PostgreSQL: {e}")
             print(f"⚠️  Error type: {type(e).__name__}")
             import traceback
             traceback.print_exc()
