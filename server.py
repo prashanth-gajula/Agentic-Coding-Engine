@@ -70,8 +70,9 @@ def health():
     if database_url:
         try:
             from langgraph.checkpoint.postgres import PostgresSaver
-            checkpointer = PostgresSaver.from_conn_string(database_url)
-            checkpointer.setup()
+            # Use context manager properly
+            with PostgresSaver.from_conn_string(database_url) as checkpointer:
+                checkpointer.setup()
             status["database"] = "connected"
         except Exception as e:
             status["database"] = f"error: {str(e)}"

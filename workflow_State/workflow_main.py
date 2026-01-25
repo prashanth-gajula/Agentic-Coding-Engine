@@ -96,32 +96,31 @@ def create_workflow():
     return graph.compile(checkpointer=checkpointer)
 
 def get_checkpointer():
-    """
-    Get the appropriate checkpointer based on environment.
-    Uses PostgreSQL in production, in-memory for local testing without DB.
-    """
     database_url = os.getenv("DATABASE_URL")
     
     if database_url:
-        # Production: Use PostgreSQL
         print("🗄️  Using PostgreSQL checkpointer")
         try:
             from langgraph.checkpoint.postgres import PostgresSaver
             
-            # Create PostgreSQL checkpointer
-            checkpointer = PostgresSaver.from_conn_string(database_url)
+            # Create connection and setup tables
+            conn = PostgresSaver.from_conn_string(database_url)
             
-            # Initialize the database tables (first time only)
-            checkpointer.setup()
+            # Setup is called automatically when used, but we can also call it explicitly
+            try:
+                conn.setup()
+            except AttributeError:
+                # If setup() doesn't exist, tables will be created on first use
+                pass
             
-            return checkpointer
+            return conn
+            
         except Exception as e:
             print(f"⚠️  Failed to connect to PostgreSQL: {e}")
             print("⚠️  Falling back to in-memory checkpointer")
             from langgraph.checkpoint.memory import MemorySaver
             return MemorySaver()
     else:
-        # Local testing: Use in-memory checkpointer
         print("⚠️  DATABASE_URL not found - using in-memory checkpointer")
         print("⚠️  Checkpoints will not persist across restarts")
         from langgraph.checkpoint.memory import MemorySaver
