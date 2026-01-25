@@ -10,3 +10,4 @@ guardrails-ai
 langsmith
 langgraph-checkpoint-postgres
 psycopg
+psycopg-binary
