@@ -1,5 +1,5 @@
 # server.py (Complete with checkpointing support)
-
+import asyncio
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -12,6 +12,41 @@ import traceback
 from workflow_State.workflow_main import create_workflow, create_initial_state, run_workflow_with_tracing
 from workflow_State.main_state import AgentState
 
+from collections import defaultdict
+from datetime import datetime, timedelta
+from fastapi import Request
+
+# Timeout configuration
+WORKFLOW_TIMEOUT_SECONDS = 300  # 5 minutes max per workflow
+
+# ✅ ADD RATE LIMITING CONFIGURATION
+RATE_LIMIT_REQUESTS = 50  # Max 10 workflow starts per hour per IP
+RATE_LIMIT_WINDOW = 3600  # 1 hour in seconds
+
+# Store: {ip_address: [timestamp1, timestamp2, ...]}
+rate_limit_tracker = defaultdict(list)
+
+def check_rate_limit(client_ip: str) -> bool:
+    """
+    Check if client has exceeded rate limit.
+    Returns True if allowed, False if rate limited.
+    """
+    now = datetime.now()
+    cutoff_time = now - timedelta(seconds=RATE_LIMIT_WINDOW)
+    
+    # Clean old requests
+    rate_limit_tracker[client_ip] = [
+        timestamp for timestamp in rate_limit_tracker[client_ip]
+        if timestamp > cutoff_time
+    ]
+    
+    # Check if over limit
+    if len(rate_limit_tracker[client_ip]) >= RATE_LIMIT_REQUESTS:
+        return False
+    
+    # Add new request
+    rate_limit_tracker[client_ip].append(now)
+    return True
 app = FastAPI(title="Agentic IDE Backend API")
 
 # Enable CORS for VS Code extension
@@ -88,8 +123,16 @@ def health():
     return status
 
 @app.post("/workflow/start")
-async def start_workflow(req: WorkflowStartRequest):
+async def start_workflow(req: WorkflowStartRequest, request: Request):
     """Start a new workflow session with checkpointing"""
+    # ✅ CHECK RATE LIMIT FIRST
+    client_ip = request.client.host
+    if not check_rate_limit(client_ip):
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded. Maximum {RATE_LIMIT_REQUESTS} workflows per hour. Please try again later."
+        )
+    
     try:
         session_id = f"session_{datetime.now().timestamp()}"
         
@@ -242,8 +285,22 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
         
         step_idx = 0
         
+        # ✅ ADD TIMEOUT TRACKING
+        start_time = asyncio.get_event_loop().time()
+        
         # Stream workflow execution
         for step_state in workflow_stream:
+            # ✅ CHECK TIMEOUT
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed > WORKFLOW_TIMEOUT_SECONDS:
+                print(f"⏰ Workflow timeout after {elapsed:.1f}s")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Workflow timeout after {WORKFLOW_TIMEOUT_SECONDS} seconds. Please try a simpler request or break it into smaller tasks."
+                })
+                session["status"] = "timeout"
+                break
+            
             # Update session state
             session["state"] = step_state
             
@@ -322,7 +379,6 @@ async def websocket_endpoint(websocket: WebSocket, session_id: str):
             await websocket.close()
         except:
             pass
-
 
 @app.delete("/workflow/{session_id}")
 async def delete_session(session_id: str):

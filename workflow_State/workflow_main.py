@@ -244,6 +244,9 @@ def run_workflow_with_tracing(app, initial_state, config=None):
         # Stream with checkpointing support
         for state in app.stream(initial_state, config=run_config, stream_mode="values"):
             yield state
+    except RecursionError as e:
+        print(f"❌ Recursion limit exceeded - workflow stuck in loop")
+        raise Exception("Workflow exceeded maximum steps. This usually indicates an infinite loop. Please simplify your request.")
     finally:
         # Ensure tracer is properly closed
         if tracer is not None:
