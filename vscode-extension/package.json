@@ -45,7 +45,7 @@
       "properties": {
         "agenticIDE.backendUrl": {
           "type": "string",
-          "default": "https://web-production-ff3c3.up.railway.app",
+          "default": "https://localhost:8000",
           "description": "Backend server URL (configure in .env file or VS Code settings for production deployments)"
         }
       }
