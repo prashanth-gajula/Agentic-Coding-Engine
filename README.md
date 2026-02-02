@@ -179,5 +179,3 @@ Typical sequence:
 - **Deployment**: Railway (backend + Postgres)
 
 ---
-# macOS/Linux
-source .venv/bin/activate
